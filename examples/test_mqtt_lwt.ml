@@ -11,10 +11,9 @@ let display_topic topic payload id =
 let sub ~broker ~port ~topic =
   Logs.info (fun m -> m "Subscribing");
   connect_to_broker ~broker ~port (fun conn ->
-     let%lwt () = subscribe ~topics:[topic] conn.write_chan in
-     let%lwt () = process_publish_pkt conn display_topic in
-     Lwt.return ()
-   )
+    let%lwt () = subscribe ~topics:[topic] conn.write_chan in
+    let%lwt () = process_publish_pkt conn display_topic in
+    Lwt.return ())
 
 let pub ~broker ~port ~topic ~message =
   Logs.info (fun m -> m "Publishing");

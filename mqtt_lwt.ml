@@ -148,8 +148,6 @@ let get_remaining_len istream =
                                               multiplier)) in
   aux 1 0
 
-
-
 let msg_header msg dup qos retain =
   char_of_int ((((msg_type_to_int msg) land 0xFF) lsl 4) lor
                ((if dup then 0x1 else 0x0)        lsl 3) lor
@@ -222,13 +220,12 @@ let rec receive_packets istream write_chan =
 *)
 let process_publish_pkt conn f =
   let rec process' () =
-    Lwt_stream.get pr >>=
-    fun pkt ->
-    match pkt with
-    | None -> Logs_lwt.err (fun m -> m "None packet!!")
-    | Some { payload = None; _ } -> Logs_lwt.err (fun m -> m "No Payload!")
-    | Some { topic = t; payload = Some p; msg_id = m; _ }  -> (f t p m) >> process' () in
-      (process' () : (unit Lwt.t))
+    (let%lwt pkt = Lwt_stream.get pr in
+      match pkt with
+      | None -> Logs_lwt.err (fun m -> m "None packet!!")
+      | Some { payload = None; _ } -> Logs_lwt.err (fun m -> m "No Payload!")
+      | Some { topic = t; payload = Some p; msg_id = m; _ } -> let%lwt () = (f t p m) in process' ()) in
+    process' ()
 
 (** recieve_connack: wait for the CONNACT (Connection achnowledgement packet) *)
 let receive_connack istream =
