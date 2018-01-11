@@ -140,8 +140,7 @@ let (pr,push_pw) = Lwt_stream.create ()
  * for this packet *)
 let get_remaining_len istream =
   let rec aux multiplier value =
-    Lwt_stream.next istream >>=
-    fun c ->
+    let%lwt c = Lwt_stream.next istream in
     let digit = Char.code c in
     match (digit land 128) with
     | 0 ->  return (value + ((digit land 127) * multiplier))

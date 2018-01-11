@@ -1,10 +1,3 @@
-(** test_mqtt.ml:
-  * Example useage of Mqtt_async module
-  * Subscribes to every topic (#) then waits for a message to
-  * topic "PING" which doesn't start with 'A' at which point it
-  * unsubscribes from topic and continues to send ping's to keep alive
-*)
-
 open Lwt
 open Mqtt_lwt
 open Printf
@@ -18,8 +11,9 @@ let display_topic topic payload id =
 let sub ~broker ~port ~topic =
   Logs.info (fun m -> m "Subscribing");
   connect_to_broker ~broker ~port (fun conn ->
-     (subscribe ~topics:[topic] conn.write_chan) >>
-     (process_publish_pkt conn display_topic >> Lwt.return ())
+     let%lwt () = subscribe ~topics:[topic] conn.write_chan in
+     let%lwt () = process_publish_pkt conn display_topic in
+     Lwt.return ()
    )
 
 let pub ~broker ~port ~topic ~message =
@@ -30,7 +24,8 @@ let () =
   Logs.set_reporter (Logs_fmt.reporter ());
   Logs.set_level (Some Logs.Debug);
   match Sys.argv with
-  | [| _ ; host ; port ; topic |] -> Lwt_main.run (sub ~broker:host ~port:(int_of_string port) ~topic:topic)
-  | [| _ ; host ; port |]         -> Lwt_main.run (sub ~broker:host ~port:(int_of_string port) ~topic:"#")
-  | [| _ ; host |]                -> Lwt_main.run (sub ~broker:host ~port:1883 ~topic:"#")
-  | args                          -> Printf.eprintf "%s <host> <port> <topic>\n%!" args.(0)
+  | [| _ ; host ; port ; topic ; msg |] -> Lwt_main.run (pub ~broker:host ~port:(int_of_string port) ~topic:topic ~message:msg)
+  | [| _ ; host ; port ; topic |]       -> Lwt_main.run (sub ~broker:host ~port:(int_of_string port) ~topic:topic)
+  | [| _ ; host ; port |]               -> Lwt_main.run (sub ~broker:host ~port:(int_of_string port) ~topic:"#")
+  | [| _ ; host |]                      -> Lwt_main.run (sub ~broker:host ~port:1883 ~topic:"#")
+  | args                                -> Printf.eprintf "%s <host> <port> <topic> <message>\n%!" args.(0)
