@@ -4,10 +4,8 @@
  * *)
 open Lwt
 open Printf
-
-let puts str =
-  let%lwt () = Lwt_io.write_line Lwt_io.stdout (str) in
-  Lwt_io.flush Lwt_io.stdout
+open Logs
+open Logs_lwt
 
 (* constants *)
 let keep_alive_timer_interval_default = 10.0  (*seconds*)
@@ -192,19 +190,18 @@ let send_puback w msg_idstr =
       Char.chr 2;
       (* remaining length *)
     ] ^ msg_idstr in
+  Logs.debug (fun m -> m "PUBACK >>>");
   Lwt_io.write w puback_str
 
 let rec receive_packets istream write_chan =
   let%lwt header = receive_packet istream in
-  (match header.msg with
-   | PUBLISH ->
-     (
-       (* only concerned about PUBLISH packets for now*)
-       (* get payload from the buffer *)
-       let msg_id_len = (if header.qos = 0 then 0 else 2) in
+  (Logs.debug (fun m -> m ">>> %s" (msg_type_to_str header.msg));
+    match header.msg with
+    | PUBLISH ->
+     (let msg_id_len = (if header.qos = 0 then 0 else 2) in
        let topic_len = ( (Char.code header.buffer.[0]) lsl 8) lor
                        (0xFF land (Char.code header.buffer.[1])) in
-       let topic =  String.sub header.buffer 2 topic_len in
+       let topic = String.sub header.buffer 2 topic_len in
        let msg_id =
          ( if header.qos = 0 then 0
            else ((Char.code header.buffer.[topic_len+2]) lsl 8) lor
@@ -212,14 +209,10 @@ let rec receive_packets istream write_chan =
        let payload_len=header.remaining_len - topic_len - 2 - msg_id_len in
        let payload = Some (String.sub header.buffer (topic_len + 2 + msg_id_len) payload_len) in
        let%lwt () = return (push_pw (Some { header ; topic ; msg_id; payload })) in
-       send_puback write_chan (int_to_str2 msg_id)
-     )
+       send_puback write_chan (int_to_str2 msg_id))
    | _ ->
-     (
-       (* TODO: implement QOS responses*)
-       return () )
-  )
-  >>= fun () -> receive_packets istream write_chan
+     (return ())
+  ) >>= fun () -> receive_packets istream write_chan
 
 (** process_publish_pkt f:
   *  when a PUBLISH packet is received back from the broker, call the
@@ -233,12 +226,10 @@ let process_publish_pkt conn f =
     Lwt_stream.get pr >>=
     fun pkt ->
     match pkt with
-    | None -> puts "None packet!!"  (* TODO *)
-    | Some { payload = None; _ } -> puts "No Payload!"
-    | Some { topic = t; payload = Some p; msg_id = m; _ }  ->
-      (f t p m) >>
-      process' ()   in
-  (process' () : (unit Lwt.t))
+    | None -> Logs_lwt.err (fun m -> m "None packet!!")
+    | Some { payload = None; _ } -> Logs_lwt.err (fun m -> m "No Payload!")
+    | Some { topic = t; payload = Some p; msg_id = m; _ }  -> (f t p m) >> process' () in
+      (process' () : (unit Lwt.t))
 
 (** recieve_connack: wait for the CONNACT (Connection achnowledgement packet) *)
 let receive_connack istream =
@@ -250,9 +241,7 @@ let receive_connack istream =
   let buffer = charlist_to_str clist in
   if (int_of_char buffer.[header.remaining_len-1]) <> 0 then
     Lwt.fail (Failure ( "Connection was not established\n " ))
-  else (
-    return ()
-  )
+  else return ()
 
 (** connect: estabishes the Tcp socket connection to the broker *)
 let connect ~host ~port =
@@ -263,22 +252,15 @@ let connect ~host ~port =
   let read_chan = Lwt_io.of_fd ~mode:Lwt_io.input  socket in
   let write_chan = Lwt_io.of_fd ~mode:Lwt_io.output socket in
   let istream = Lwt_io.read_chars read_chan in
-  let%lwt () = Lwt_io.write_line Lwt_io.stdout "Connected" in
-  return {
-    socket;
-    read_chan;
-    write_chan;
-    istream
-  }
+  Logs.info (fun m -> m "Connected to %s, port %d" host port);
+  return {socket; read_chan; write_chan; istream}
 
 
 (** send_ping_req: sents a PINGREQ packet to the broker to keep the connetioon alive *)
 let send_ping_req w_chan =
-  let ping_str = charlist_to_str [
-      (msg_header PINGREQ false 0 false);
-      Char.chr 0  (* remaining length *)
-    ] in
+  let ping_str = charlist_to_str [(msg_header PINGREQ false 0 false); Char.chr 0  (* remaining length *)] in
   let%lwt () = Lwt_io.write w_chan ping_str in
+  Logs.debug (fun m -> m "PINGREQ >>>");
   Lwt_io.flush w_chan
 
 (** ping_loop: send a PINGREQ at regular intervals *)
@@ -294,7 +276,7 @@ let multi_byte_len len =
   let rec aux bodylen acc = match bodylen with
     | 0 -> List.rev acc
     | _ -> let bodylen' = bodylen/128 in
-      let digit    = (bodylen mod 0x80) lor (if bodylen' > 0 then 0x80 else 0x00) in
+      let digit = (bodylen mod 0x80) lor (if bodylen' > 0 then 0x80 else 0x00) in
       aux bodylen' (digit::acc) in
   aux len []
 
