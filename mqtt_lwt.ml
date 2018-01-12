@@ -192,7 +192,7 @@ let send_puback w msg_idstr =
 
 let rec receive_packets istream write_chan =
   let%lwt header = receive_packet istream in
-  (Logs.debug (fun m -> m ">>> %s" (msg_type_to_str header.msg));
+  let%lwt () = (Logs.debug (fun m -> m ">>> %s" (msg_type_to_str header.msg));
     match header.msg with
     | PUBLISH ->
      (let msg_id_len = (if header.qos = 0 then 0 else 2) in
@@ -209,7 +209,8 @@ let rec receive_packets istream write_chan =
        send_puback write_chan (int_to_str2 msg_id))
    | _ ->
      (return ())
-  ) >>= fun () -> receive_packets istream write_chan
+  ) in
+  receive_packets istream write_chan
 
 (** process_publish_pkt f:
   *  when a PUBLISH packet is received back from the broker, call the
@@ -303,7 +304,8 @@ let publish ?(dup=false) ?(qos=0) ?(retain=false) ~topic ~payload w =
   let publish_str' = var_header ^ payload in
   let remaining_bytes = List.map (fun i -> char_of_int i) (multi_byte_len (String.length publish_str')) |> charlist_to_str in
   let publish_str = (string_of_char (msg_header PUBLISH dup qos retain)) ^ remaining_bytes ^ publish_str' in
-  Lwt_io.write w publish_str >> Lwt_io.flush w
+  let%lwt () = Lwt_io.write w publish_str in
+  Lwt_io.flush w
 
 (** publish_periodically: periodically publish a message to
  * a topic, period specified by period in seconds (float)
