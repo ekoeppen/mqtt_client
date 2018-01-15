@@ -5,19 +5,20 @@ open Logs
 open Logs_fmt
 open Logs_lwt
 
-let display_topic topic payload id =
+let display_topic _ topic payload id =
   Logs_lwt.info (fun m -> m "Topic: %s Payload: %s Msg_id: %d" topic payload id)
 
 let sub ~broker ~port ~topic =
   Logs.info (fun m -> m "Subscribing");
-  connect_to_broker ~broker ~port (fun conn ->
-    let%lwt () = subscribe ~topics:[topic] conn.write_chan in
-    let%lwt () = process_publish_pkt conn display_topic in
-    Lwt.return ())
+  let%lwt conn = connect_to_broker ~opts:default_conn_opts ~broker ~port in
+  let%lwt () = subscribe ~topics:[topic] conn.write_chan in
+  let%lwt () = process_publish_pkt conn display_topic in
+  Lwt.return ()
 
 let pub ~broker ~port ~topic ~message =
   Logs.info (fun m -> m "Publishing");
-  connect_to_broker ~broker ~port (fun conn -> (publish ~topic:topic ~payload:message conn.write_chan))
+  let%lwt conn = connect_to_broker ~opts:default_conn_opts ~broker ~port in
+  publish ~topic:topic ~payload:message conn.write_chan
 
 let () =
   Logs.set_reporter (Logs_fmt.reporter ());

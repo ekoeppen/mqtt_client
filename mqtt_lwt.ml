@@ -8,7 +8,7 @@ open Logs
 open Logs_lwt
 
 (* constants *)
-let keep_alive_timer_interval_default = 10.0  (*seconds*)
+let keep_alive_interval_default = 10.0  (*seconds*)
 let keepalive       = 15                      (*seconds*)
 let version         = 3                (* MQTT version *)
 
@@ -45,6 +45,34 @@ type conn_t = {
   read_chan: Lwt_io.input Lwt_io.channel;
   write_chan: Lwt_io.output Lwt_io.channel;
   istream: char Lwt_stream.t
+}
+
+type conn_opts_t = {
+  clean_session : bool;
+  keep_alive_interval : float;
+  dup : bool;
+  qos : int;
+  retain : bool;
+  username : string;
+  password : string;
+  will_message: string;
+  will_topic : string;
+  will_qos : int;
+  will_retain : bool
+}
+
+let default_conn_opts = {
+  clean_session = true;
+  keep_alive_interval = 10.0;
+  dup = false;
+  qos = 0;
+  retain = false;
+  username = "";
+  password = "";
+  will_message = "";
+  will_topic = "";
+  will_qos = 0;
+  will_retain = false;
 }
 
 type msg_type =
@@ -225,7 +253,7 @@ let process_publish_pkt conn f =
       match pkt with
       | None -> Logs_lwt.err (fun m -> m "None packet!!")
       | Some { payload = None; _ } -> Logs_lwt.err (fun m -> m "No Payload!")
-      | Some { topic = t; payload = Some p; msg_id = m; _ } -> let%lwt () = (f t p m) in process' ()) in
+      | Some { topic = t; payload = Some p; msg_id = m; _ } -> let%lwt () = (f conn t p m) in process' ()) in
     process' ()
 
 (** recieve_connack: wait for the CONNACT (Connection achnowledgement packet) *)
@@ -261,10 +289,10 @@ let send_ping_req w_chan =
   Lwt_io.flush w_chan
 
 (** ping_loop: send a PINGREQ at regular intervals *)
-let rec ping_loop ?(interval=keep_alive_timer_interval_default) conn w =
+let rec ping_loop ?(interval=keep_alive_interval_default) w =
   let%lwt () = Lwt_unix.sleep interval in
   let%lwt () = send_ping_req w in
-  ping_loop conn w
+  ping_loop w
 
 (** multi_byte_len: The algorithm for encoding a decimal number into the
  * variable length encoding scheme (see section 2.1 of MQTT spec
@@ -319,40 +347,39 @@ let publish_periodically ?(qos=0) ?(period=1.0) ~topic f w =
   (publish_periodically' () : (unit Lwt.t) )
 
 (** connect_to_broker *)
-let connect_to_broker ?(keep_alive_interval=keep_alive_timer_interval_default+.0.5)
-    ?(dup=false) ?(qos=0) ?(retain=false) ?(username="") ?(password="")
-    ?(will_message="") ?(will_topic="") ?(clean_session=true) ?(will_qos=0)
-    ?(will_retain=false) ~broker ~port f =
+let connect_to_broker ~opts ~broker ~port =
   let connect_flags =
-    ((if clean_session then 0x02 else 0) lor
-     (if (String.length will_topic ) > 0 then 0x04 else 0) lor
-     ((will_qos land 0x03) lsl 3) lor
-     (if will_retain then 0x20 else 0) lor
-     (if (String.length password) > 0 then 0x40 else 0) lor
-     (if (String.length username) > 0 then 0x80 else 0)) in
+    ((if opts.clean_session then 0x02 else 0) lor
+     (if (String.length opts.will_topic ) > 0 then 0x04 else 0) lor
+     ((opts.will_qos land 0x03) lsl 3) lor
+     (if opts.will_retain then 0x20 else 0) lor
+     (if (String.length opts.password) > 0 then 0x40 else 0) lor
+     (if (String.length opts.username) > 0 then 0x80 else 0)) in
   (* keepalive timer, adding 1 below just to make the interval 1 sec longer than
      the ping_loop for safety sake *)
-  let ka_timer_str = int_to_str2( int_of_float keep_alive_interval+1) in
+  let ka_timer_str = int_to_str2(int_of_float opts.keep_alive_interval + 1) in
   let variable_header = (encode_string "MQIsdp") ^
-                        (string_of_char (char_of_int version)) ^
-                        (string_of_char (char_of_int connect_flags)) ^
-                        ka_timer_str in
+    (string_of_char (char_of_int version)) ^
+    (string_of_char (char_of_int connect_flags)) ^
+    ka_timer_str in
   (* clientid string should be no longer that 23 chars *)
   let clientid = "OCaml_12345678901234567" in
   let payload =
     (encode_string clientid) ^
-    (if (String.length will_topic)> 0 then encode_string will_topic else "")^
-    (if (String.length will_message)>0 then encode_string will_message else "")^
-    (if (String.length username) >0 then encode_string username else "") ^
-    (if (String.length password) >0 then encode_string password else "") in
+    (if (String.length opts.will_topic) > 0 then encode_string opts.will_topic else "")^
+    (if (String.length opts.will_message) > 0 then encode_string opts.will_message else "")^
+    (if (String.length opts.username) > 0 then encode_string opts.username else "") ^
+    (if (String.length opts.password) > 0 then encode_string opts.password else "") in
   let vheader_payload = variable_header ^ payload in
-  let remaining_len = (multi_byte_len (String.length vheader_payload) )
-                      |> List.map (fun i -> char_of_int i)
-                      |> charlist_to_str in
-  let connect_str = (string_of_char (msg_header CONNECT dup qos retain)) ^ remaining_len ^ vheader_payload in
+  let remaining_len = (multi_byte_len (String.length vheader_payload))
+    |> List.map (fun i -> char_of_int i)
+    |> charlist_to_str in
+  let connect_str = (string_of_char (msg_header CONNECT opts.dup opts.qos opts.retain)) ^ remaining_len ^ vheader_payload in
   let%lwt t = connect ~host:broker ~port:port in
   let%lwt () = Lwt_io.write t.write_chan connect_str in
   let%lwt () = receive_connack t.istream in
-  ( (ping_loop  ~interval:keep_alive_interval t t.write_chan ) <&>
-    (f t) <&>
-    (receive_packets t.istream t.write_chan) )
+  Lwt.async (fun () ->
+    Lwt.join [
+      ping_loop ~interval:keep_alive_interval_default t.write_chan;
+      receive_packets t.istream t.write_chan]);
+  return t
