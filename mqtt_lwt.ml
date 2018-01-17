@@ -75,6 +75,14 @@ let default_conn_opts = {
   will_retain = false;
 }
 
+let to_int opts =
+  ((if opts.clean_session then 0x02 else 0) lor
+   (if (String.length opts.will_topic ) > 0 then 0x04 else 0) lor
+   ((opts.will_qos land 0x03) lsl 3) lor
+   (if opts.will_retain then 0x20 else 0) lor
+   (if (String.length opts.password) > 0 then 0x40 else 0) lor
+   (if (String.length opts.username) > 0 then 0x80 else 0))
+
 type msg_type =
     CONNECT
   | CONNACK
@@ -348,19 +356,12 @@ let publish_periodically ?(qos=0) ?(period=1.0) ~topic f w =
 
 (** connect_to_broker *)
 let connect_to_broker ~opts ~broker ~port =
-  let connect_flags =
-    ((if opts.clean_session then 0x02 else 0) lor
-     (if (String.length opts.will_topic ) > 0 then 0x04 else 0) lor
-     ((opts.will_qos land 0x03) lsl 3) lor
-     (if opts.will_retain then 0x20 else 0) lor
-     (if (String.length opts.password) > 0 then 0x40 else 0) lor
-     (if (String.length opts.username) > 0 then 0x80 else 0)) in
   (* keepalive timer, adding 1 below just to make the interval 1 sec longer than
      the ping_loop for safety sake *)
   let ka_timer_str = int_to_str2(int_of_float opts.keep_alive_interval + 1) in
   let variable_header = (encode_string "MQIsdp") ^
-    (string_of_char (char_of_int version)) ^
-    (string_of_char (char_of_int connect_flags)) ^
+    (version |> char_of_int |> string_of_char) ^
+    (to_int opts |> char_of_int |> string_of_char) ^
     ka_timer_str in
   (* clientid string should be no longer that 23 chars *)
   let clientid = "OCaml_12345678901234567" in
