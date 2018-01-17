@@ -38,8 +38,6 @@ let charlist_to_str l =
 (* end of "private" helper funcs *)
 
 type conn_t = {
-  socket: Lwt_unix.file_descr; (* probably don't need socket *)
-  read_chan: Lwt_io.input Lwt_io.channel;
   write_chan: Lwt_io.output Lwt_io.channel;
   istream: char Lwt_stream.t
 }
@@ -272,18 +270,20 @@ let receive_connack istream =
     Lwt.fail (Failure ( "Connection was not established\n " ))
   else return ()
 
-(** connect: estabishes the Tcp socket connection to the broker *)
+let setup_channels socket =
+  let read_chan = Lwt_io.of_fd ~mode:Lwt_io.input  socket in
+  let write_chan = Lwt_io.of_fd ~mode:Lwt_io.output socket in
+  let istream = Lwt_io.read_chars read_chan in
+  return {write_chan; istream}
+
+(* connect: estabishes the Tcp socket connection to the broker *)
 let connect ~host ~port =
   let socket = Lwt_unix.socket Lwt_unix.PF_INET Lwt_unix.SOCK_STREAM 0 in
   let%lwt host_info = Lwt_unix.gethostbyname host in
   let server_address = host_info.Lwt_unix.h_addr_list.(0) in
   let%lwt () = Lwt_unix.connect socket (Lwt_unix.ADDR_INET (server_address, port)) in
-  let read_chan = Lwt_io.of_fd ~mode:Lwt_io.input  socket in
-  let write_chan = Lwt_io.of_fd ~mode:Lwt_io.output socket in
-  let istream = Lwt_io.read_chars read_chan in
   Logs.info (fun m -> m "Connected to %s, port %d" host port);
-  return {socket; read_chan; write_chan; istream}
-
+  setup_channels socket
 
 (* send_ping_req: sents a PINGREQ packet to the broker to keep the connetioon alive *)
 let send_ping_req w_chan =
