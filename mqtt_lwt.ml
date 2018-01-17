@@ -8,27 +8,25 @@ open Logs
 open Logs_lwt
 
 (* constants *)
-let keep_alive_interval_default = 10.0  (*seconds*)
-let keepalive       = 15                      (*seconds*)
-let version         = 3                (* MQTT version *)
+let keep_alive_interval_default = 10.0 (*seconds*)
+let version = 3 (* MQTT version *)
 
 let msg_id = ref 0
 
 (* "private" Helper funcs *)
-(** int_to_str2:  pass in an int and get a two-char string back *)
 let string_of_char c = String.make 1 c
 
-(** int_to_str2: integer (up to 65535) to 2 byte encoded string *)
+(* int_to_str2: integer (up to 65535) to 2 byte encoded string *)
 (* TODO: should probably throw exception if i is greater than 65535 *)
 let int_to_str2 i =
   (string_of_char (char_of_int ((i lsr 8) land 0xFF))) ^
   (string_of_char (char_of_int (i land 0xFF)))
 
-(** encode_string: Given a string returns two-byte length follwed by string *)
+(* encode_string: Given a string returns two-byte length follwed by string *)
 let encode_string str =
   (int_to_str2 (String.length str)) ^ str
 
-(** increment the current msg_id and return it as a 2 byte string *)
+(* increment the current msg_id and return it as a 2 byte string *)
 let get_msg_id_bytes =
   incr msg_id;
   int_to_str2 !msg_id
@@ -37,7 +35,6 @@ let charlist_to_str l =
   let buf = Buffer.create (List.length l) in
   List.iter (Buffer.add_char buf) l;
   Buffer.contents buf
-
 (* end of "private" helper funcs *)
 
 type conn_t = {
@@ -169,19 +166,18 @@ let int_to_msg_type b = match b with
   | _  -> None
 
 
-(*let pr,pw = Lwt_io.pipe ~buffer_size:256 ()*)
-let (pr,push_pw) = Lwt_stream.create ()
+let (pr, push_pw) = Lwt_stream.create ()
 
 (* get_remaining_len: find the number of remaining bytes needed
- * for this packet *)
+ * for this packet
+ *)
 let get_remaining_len istream =
   let rec aux multiplier value =
     let%lwt c = Lwt_stream.next istream in
     let digit = Char.code c in
     match (digit land 128) with
     | 0 ->  return (value + ((digit land 127) * multiplier))
-    | _ ->  aux (multiplier * 128) ( value + ((digit land 127)*
-                                              multiplier)) in
+    | _ ->  aux (multiplier * 128) ( value + ((digit land 127)* multiplier)) in
   aux 1 0
 
 let msg_header msg dup qos retain =
@@ -232,14 +228,14 @@ let rec receive_packets istream write_chan =
     match header.msg with
     | PUBLISH ->
      (let msg_id_len = (if header.qos = 0 then 0 else 2) in
-       let topic_len = ( (Char.code header.buffer.[0]) lsl 8) lor
-                       (0xFF land (Char.code header.buffer.[1])) in
+       let topic_len = ((Char.code header.buffer.[0]) lsl 8) lor
+         (0xFF land (Char.code header.buffer.[1])) in
        let topic = String.sub header.buffer 2 topic_len in
        let msg_id =
-         ( if header.qos = 0 then 0
-           else ((Char.code header.buffer.[topic_len+2]) lsl 8) lor
-                (0xFF land (Char.code header.buffer.[topic_len+3])) ) in
-       let payload_len=header.remaining_len - topic_len - 2 - msg_id_len in
+         (if header.qos = 0 then 0
+           else ((Char.code header.buffer.[topic_len + 2]) lsl 8) lor
+                (0xFF land (Char.code header.buffer.[topic_len + 3]))) in
+       let payload_len = header.remaining_len - topic_len - 2 - msg_id_len in
        let payload = Some (String.sub header.buffer (topic_len + 2 + msg_id_len) payload_len) in
        let%lwt () = return (push_pw (Some { header ; topic ; msg_id; payload })) in
        send_puback write_chan (int_to_str2 msg_id))
@@ -248,13 +244,13 @@ let rec receive_packets istream write_chan =
   ) in
   receive_packets istream write_chan
 
-(** process_publish_pkt f:
-  *  when a PUBLISH packet is received back from the broker, call the
-  *  passed-in function f with topic, payload and message id.
-  *  User supplies the function f which will process the publish packet
-  *  as the user sees fit. This function is called asynchronously whenever
-  *  a PUBLISH packet is received.
-*)
+(* process_publish_pkt f:
+ * when a PUBLISH packet is received back from the broker, call the
+ * passed-in function f with topic, payload and message id.
+ * User supplies the function f which will process the publish packet
+ * as the user sees fit. This function is called asynchronously whenever
+ * a PUBLISH packet is received.
+ *)
 let process_publish_pkt conn f =
   let rec process' () =
     (let%lwt pkt = Lwt_stream.get pr in
@@ -264,7 +260,7 @@ let process_publish_pkt conn f =
       | Some { topic = t; payload = Some p; msg_id = m; _ } -> let%lwt () = (f conn t p m) in process' ()) in
     process' ()
 
-(** recieve_connack: wait for the CONNACT (Connection achnowledgement packet) *)
+(* recieve_connack: wait for the CONNACT (Connection achnowledgement packet) *)
 let receive_connack istream =
   let%lwt header = get_header istream in
   if (header.msg <> CONNACK) then begin
@@ -289,31 +285,31 @@ let connect ~host ~port =
   return {socket; read_chan; write_chan; istream}
 
 
-(** send_ping_req: sents a PINGREQ packet to the broker to keep the connetioon alive *)
+(* send_ping_req: sents a PINGREQ packet to the broker to keep the connetioon alive *)
 let send_ping_req w_chan =
   let ping_str = charlist_to_str [(msg_header PINGREQ false 0 false); Char.chr 0  (* remaining length *)] in
   let%lwt () = Lwt_io.write w_chan ping_str in
   Logs.debug (fun m -> m "PINGREQ >>>");
   Lwt_io.flush w_chan
 
-(** ping_loop: send a PINGREQ at regular intervals *)
+(* ping_loop: send a PINGREQ at regular intervals *)
 let rec ping_loop ?(interval=keep_alive_interval_default) w =
   let%lwt () = Lwt_unix.sleep interval in
   let%lwt () = send_ping_req w in
   ping_loop w
 
-(** multi_byte_len: The algorithm for encoding a decimal number into the
+(* multi_byte_len: The algorithm for encoding a decimal number into the
  * variable length encoding scheme (see section 2.1 of MQTT spec
-*)
+ *)
 let multi_byte_len len =
   let rec aux bodylen acc = match bodylen with
     | 0 -> List.rev acc
-    | _ -> let bodylen' = bodylen/128 in
+    | _ -> let bodylen' = bodylen / 128 in
       let digit = (bodylen mod 0x80) lor (if bodylen' > 0 then 0x80 else 0x00) in
       aux bodylen' (digit::acc) in
   aux len []
 
-(** subscribe to topics *)
+(* subscribe to topics *)
 let subscribe ?(qos=1) ~topics w =
   let payload =
     (if qos > 0 then get_msg_id_bytes else "") ^
@@ -323,7 +319,6 @@ let subscribe ?(qos=1) ~topics w =
   let%lwt () = Lwt_io.write w subscribe_str in
   Lwt_io.flush w
 
-(* TODO unsubscribe and subscribe are almost exactly identical. Refactor *)
 let unsubscribe ?(qos=1) ~topics w =
   let payload =
     (if qos > 0 then get_msg_id_bytes else "") ^
@@ -333,7 +328,7 @@ let unsubscribe ?(qos=1) ~topics w =
   let%lwt () = Lwt_io.write w unsubscribe_str in
   Lwt_io.flush w
 
-(** publish message to topic *)
+(* publish message to topic *)
 let publish ?(dup=false) ?(qos=0) ?(retain=false) ~topic ~payload w =
   let msg_id_str = if qos > 0 then get_msg_id_bytes else "" in
   let var_header = (encode_string topic) ^ msg_id_str in
@@ -343,10 +338,10 @@ let publish ?(dup=false) ?(qos=0) ?(retain=false) ~topic ~payload w =
   let%lwt () = Lwt_io.write w publish_str in
   Lwt_io.flush w
 
-(** publish_periodically: periodically publish a message to
+(* publish_periodically: periodically publish a message to
  * a topic, period specified by period in seconds (float)
-*)
-let publish_periodically ?(qos=0) ?(period=1.0) ~topic f w =
+ *)
+let publish_periodically ?(qos=1) ?(period=1.0) ~topic f w =
   let rec publish_periodically' () =
     let pub_str = f () in
     let%lwt () = Lwt_unix.sleep period in
@@ -354,7 +349,7 @@ let publish_periodically ?(qos=0) ?(period=1.0) ~topic f w =
     publish_periodically' () in
   (publish_periodically' () : (unit Lwt.t) )
 
-(** connect_to_broker *)
+(* connect_to_broker *)
 let connect_to_broker ~opts ~broker ~port =
   (* keepalive timer, adding 1 below just to make the interval 1 sec longer than
      the ping_loop for safety sake *)
