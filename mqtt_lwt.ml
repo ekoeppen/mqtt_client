@@ -38,8 +38,8 @@ let charlist_to_str l =
 (* end of "private" helper funcs *)
 
 type conn_t = {
-  write_chan: Lwt_io.output Lwt_io.channel;
-  istream: char Lwt_stream.t
+  oc: Lwt_io.output Lwt_io.channel;
+  ic: Lwt_io.input Lwt_io.channel;
 }
 
 type conn_opts_t = {
@@ -220,7 +220,8 @@ let send_puback w msg_idstr =
   Logs.debug (fun m -> m "PUBACK >>>");
   Lwt_io.write w puback_str
 
-let rec receive_packets istream write_chan =
+let rec receive_packets ic oc =
+  let istream = Lwt_io.read_chars ic in
   let%lwt header = receive_packet istream in
   let%lwt () = (Logs.debug (fun m -> m ">>> %s" (msg_type_to_str header.msg));
     match header.msg with
@@ -236,11 +237,11 @@ let rec receive_packets istream write_chan =
        let payload_len = header.remaining_len - topic_len - 2 - msg_id_len in
        let payload = Some (String.sub header.buffer (topic_len + 2 + msg_id_len) payload_len) in
        let%lwt () = return (push_pw (Some { header ; topic ; msg_id; payload })) in
-       send_puback write_chan (int_to_str2 msg_id))
+       send_puback oc (int_to_str2 msg_id))
    | _ ->
      (return ())
   ) in
-  receive_packets istream write_chan
+  receive_packets ic oc
 
 (* process_publish_pkt f:
  * when a PUBLISH packet is received back from the broker, call the
@@ -344,13 +345,9 @@ let connect ~host ~port =
   return (socket)
 
 let of_socket socket =
-  let read_chan = Lwt_io.of_fd ~mode:Lwt_io.input  socket in
-  let write_chan = Lwt_io.of_fd ~mode:Lwt_io.output socket in
-  let istream = Lwt_io.read_chars read_chan in
-  {write_chan; istream}
-
-let of_streams (ic, oc) =
-  {write_chan = oc; istream = Lwt_io.read_chars ic}
+  let oc = Lwt_io.of_fd ~mode:Lwt_io.output socket in
+  let ic = Lwt_io.of_fd ~mode:Lwt_io.input socket in
+  {oc; ic}
 
 let connect_str opts =
   (* keepalive timer, adding 1 below just to make the interval 1 sec longer than
@@ -374,15 +371,18 @@ let connect_str opts =
     |> charlist_to_str in
   (string_of_char (msg_header CONNECT opts.dup opts.qos opts.retain)) ^ remaining_len ^ vheader_payload
 
+let mqtt_client t ~opts =
+  let%lwt () = Lwt_io.write t.oc (connect_str opts) in
+  let%lwt () = receive_connack (Lwt_io.read_chars t.ic) in
+  Logs.info (fun m -> m "Connect handshake complete");
+  Lwt.async (fun () ->
+    Lwt.join [
+      ping_loop ~interval:keep_alive_interval_default t.oc;
+      receive_packets t.ic t.oc]);
+  return t
+
 (* connect_to_broker *)
 let connect_to_broker ~opts ~broker ~port =
   let%lwt socket = connect ~host:broker ~port:port in
   let t = of_socket socket in
-  let%lwt () = Lwt_io.write t.write_chan (connect_str opts) in
-  let%lwt () = receive_connack t.istream in
-  Logs.info (fun m -> m "Connect handshake complete");
-  Lwt.async (fun () ->
-    Lwt.join [
-      ping_loop ~interval:keep_alive_interval_default t.write_chan;
-      receive_packets t.istream t.write_chan]);
-  return t
+  mqtt_client t ~opts
