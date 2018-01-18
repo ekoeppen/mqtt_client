@@ -270,21 +270,6 @@ let receive_connack istream =
     Lwt.fail (Failure ( "Connection was not established\n " ))
   else return ()
 
-let setup_channels socket =
-  let read_chan = Lwt_io.of_fd ~mode:Lwt_io.input  socket in
-  let write_chan = Lwt_io.of_fd ~mode:Lwt_io.output socket in
-  let istream = Lwt_io.read_chars read_chan in
-  return {write_chan; istream}
-
-(* connect: estabishes the Tcp socket connection to the broker *)
-let connect ~host ~port =
-  let socket = Lwt_unix.socket Lwt_unix.PF_INET Lwt_unix.SOCK_STREAM 0 in
-  let%lwt host_info = Lwt_unix.gethostbyname host in
-  let server_address = host_info.Lwt_unix.h_addr_list.(0) in
-  let%lwt () = Lwt_unix.connect socket (Lwt_unix.ADDR_INET (server_address, port)) in
-  Logs.info (fun m -> m "Connected to %s, port %d" host port);
-  setup_channels socket
-
 (* send_ping_req: sents a PINGREQ packet to the broker to keep the connetioon alive *)
 let send_ping_req w_chan =
   let ping_str = charlist_to_str [(msg_header PINGREQ false 0 false); Char.chr 0  (* remaining length *)] in
@@ -349,8 +334,25 @@ let publish_periodically ?(qos=1) ?(period=1.0) ~topic f w =
     publish_periodically' () in
   (publish_periodically' () : (unit Lwt.t) )
 
-(* connect_to_broker *)
-let connect_to_broker ~opts ~broker ~port =
+(* connect: estabishes the Tcp socket connection to the broker *)
+let connect ~host ~port =
+  let socket = Lwt_unix.socket Lwt_unix.PF_INET Lwt_unix.SOCK_STREAM 0 in
+  let%lwt host_info = Lwt_unix.gethostbyname host in
+  let server_address = host_info.Lwt_unix.h_addr_list.(0) in
+  let%lwt () = Lwt_unix.connect socket (Lwt_unix.ADDR_INET (server_address, port)) in
+  Logs.info (fun m -> m "Connected to %s, port %d" host port);
+  return (socket)
+
+let of_socket socket =
+  let read_chan = Lwt_io.of_fd ~mode:Lwt_io.input  socket in
+  let write_chan = Lwt_io.of_fd ~mode:Lwt_io.output socket in
+  let istream = Lwt_io.read_chars read_chan in
+  {write_chan; istream}
+
+let of_streams (ic, oc) =
+  {write_chan = oc; istream = Lwt_io.read_chars ic}
+
+let connect_str opts =
   (* keepalive timer, adding 1 below just to make the interval 1 sec longer than
      the ping_loop for safety sake *)
   let ka_timer_str = int_to_str2(int_of_float opts.keep_alive_interval + 1) in
@@ -370,10 +372,15 @@ let connect_to_broker ~opts ~broker ~port =
   let remaining_len = (multi_byte_len (String.length vheader_payload))
     |> List.map (fun i -> char_of_int i)
     |> charlist_to_str in
-  let connect_str = (string_of_char (msg_header CONNECT opts.dup opts.qos opts.retain)) ^ remaining_len ^ vheader_payload in
-  let%lwt t = connect ~host:broker ~port:port in
-  let%lwt () = Lwt_io.write t.write_chan connect_str in
+  (string_of_char (msg_header CONNECT opts.dup opts.qos opts.retain)) ^ remaining_len ^ vheader_payload
+
+(* connect_to_broker *)
+let connect_to_broker ~opts ~broker ~port =
+  let%lwt socket = connect ~host:broker ~port:port in
+  let t = of_socket socket in
+  let%lwt () = Lwt_io.write t.write_chan (connect_str opts) in
   let%lwt () = receive_connack t.istream in
+  Logs.info (fun m -> m "Connect handshake complete");
   Lwt.async (fun () ->
     Lwt.join [
       ping_loop ~interval:keep_alive_interval_default t.write_chan;
