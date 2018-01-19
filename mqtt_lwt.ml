@@ -37,7 +37,7 @@ let charlist_to_str l =
   Buffer.contents buf
 (* end of "private" helper funcs *)
 
-type conn_t = {
+type t = {
   oc: Lwt_io.output Lwt_io.channel;
   ic: Lwt_io.input Lwt_io.channel;
 }

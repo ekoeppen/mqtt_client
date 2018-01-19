@@ -14,3 +14,4 @@ Dependencies:
 * Logs
 * Fmt
 * Lwt
+* Tls
