@@ -27,7 +27,7 @@ let start_client ~broker ~port ~ca_file ~cert_file ~key_file =
   mqtt_client conn ~opts:default_conn_opts
 
 let display_topic _ topic payload id =
-  Logs_lwt.info (fun m -> m "Topic: %s Payload: %s Msg_id: %d" topic payload id)
+  Logs_lwt.app (fun m -> m "Topic: %s Payload: %s Msg_id: %d" topic payload id)
 
 let sub ~broker ~port ~topic ~ca_file ~cert_file ~key_file =
   Logs.info (fun m -> m "Subscribing");
