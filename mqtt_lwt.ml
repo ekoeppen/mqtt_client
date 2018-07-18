@@ -1,11 +1,4 @@
-(** mqtt_async.ml: MQTT client library written in OCaml
- * Based on spec at:
- * http://public.dhe.ibm.com/software/dw/webservices/ws-mqtt/mqtt-v3r1.html
- * *)
 open Lwt
-open Printf
-open Logs
-open Logs_lwt
 
 (* constants *)
 let keep_alive_interval_default = 10.0 (*seconds*)

@@ -1,10 +1,4 @@
-open Lwt
 open Mqtt_lwt
-open Printf
-open Logs
-open Logs_fmt
-open Logs_lwt
-open Tls_lwt
 open Cmdliner
 
 let tls_connect ~broker ~port ~ca_file ~cert_file ~key_file =
