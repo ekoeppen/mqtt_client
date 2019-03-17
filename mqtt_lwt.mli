@@ -9,6 +9,7 @@ type conn_opts_t = {
   dup : bool;
   qos : int;
   retain : bool;
+  client_id : string;
   username : string;
   password : string;
   will_message : string;

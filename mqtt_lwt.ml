@@ -41,6 +41,7 @@ type conn_opts_t = {
   dup : bool;
   qos : int;
   retain : bool;
+  client_id : string;
   username : string;
   password : string;
   will_message: string;
@@ -55,6 +56,7 @@ let default_conn_opts = {
   dup = false;
   qos = 0;
   retain = false;
+  client_id = "mqtt_lwt_00000000";
   username = "";
   password = "";
   will_message = "";
@@ -351,9 +353,8 @@ let connect_str opts =
     (to_int opts |> char_of_int |> string_of_char) ^
     ka_timer_str in
   (* clientid string should be no longer that 23 chars *)
-  let clientid = "OCaml_12345678901234567" in
   let payload =
-    (encode_string clientid) ^
+    (encode_string opts.client_id) ^
     (if (String.length opts.will_topic) > 0 then encode_string opts.will_topic else "")^
     (if (String.length opts.will_message) > 0 then encode_string opts.will_message else "")^
     (if (String.length opts.username) > 0 then encode_string opts.username else "") ^
