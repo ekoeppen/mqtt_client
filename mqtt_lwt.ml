@@ -369,10 +369,9 @@ let mqtt_client t ~opts =
   let%lwt () = Lwt_io.write t.oc (connect_str opts) in
   let%lwt () = receive_connack (Lwt_io.read_chars t.ic) in
   Logs.info (fun m -> m "Connect handshake complete");
-  Lwt.async (fun () ->
-    Lwt.join [
-      ping_loop ~interval:keep_alive_interval_default t.oc;
-      receive_packets t.ic t.oc]);
+  let%lwt () = Lwt.join [
+    ping_loop ~interval:keep_alive_interval_default t.oc;
+    receive_packets t.ic t.oc] in
   return t
 
 (* connect_to_broker *)
