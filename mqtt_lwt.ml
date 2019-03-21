@@ -297,8 +297,8 @@ let subscribe ?(qos=1) ~topics w =
     List.fold_left (fun a topic -> a ^ (encode_string topic) ^ string_of_char (char_of_int qos)) "" topics in
   let remaining_len = List.map (fun i -> char_of_int i) (multi_byte_len (String.length payload)) |> charlist_to_str in
   let subscribe_str = (string_of_char (msg_header SUBSCRIBE false 1 false)) ^ remaining_len ^ payload in
-  let%lwt () = Lwt_io.write w subscribe_str in
-  Lwt_io.flush w
+  let%lwt () = Lwt_io.write w.oc subscribe_str in
+  Lwt_io.flush w.oc
 
 let unsubscribe ?(qos=1) ~topics w =
   let payload =
@@ -306,8 +306,8 @@ let unsubscribe ?(qos=1) ~topics w =
     List.fold_left (fun a topic -> a ^ encode_string topic) "" topics in
   let remaining_len = List.map (fun i -> char_of_int i) (multi_byte_len (String.length payload)) |> charlist_to_str in
   let unsubscribe_str = (string_of_char (msg_header UNSUBSCRIBE false 1 false)) ^ remaining_len ^ payload in
-  let%lwt () = Lwt_io.write w unsubscribe_str in
-  Lwt_io.flush w
+  let%lwt () = Lwt_io.write w.oc unsubscribe_str in
+  Lwt_io.flush w.oc
 
 (* publish message to topic *)
 let publish ?(dup=false) ?(qos=0) ?(retain=false) ~topic ~payload w =
@@ -316,8 +316,8 @@ let publish ?(dup=false) ?(qos=0) ?(retain=false) ~topic ~payload w =
   let publish_str' = var_header ^ payload in
   let remaining_bytes = List.map (fun i -> char_of_int i) (multi_byte_len (String.length publish_str')) |> charlist_to_str in
   let publish_str = (string_of_char (msg_header PUBLISH dup qos retain)) ^ remaining_bytes ^ publish_str' in
-  let%lwt () = Lwt_io.write w publish_str in
-  Lwt_io.flush w
+  let%lwt () = Lwt_io.write w.oc publish_str in
+  Lwt_io.flush w.oc
 
 (* publish_periodically: periodically publish a message to
  * a topic, period specified by period in seconds (float)
@@ -330,8 +330,8 @@ let publish_periodically ?(qos=1) ?(period=1.0) ~topic f w =
     publish_periodically' () in
   (publish_periodically' () : (unit Lwt.t) )
 
-(* connect: estabishes the Tcp socket connection to the broker *)
-let connect ~host ~port =
+(* connect_socket: estabishes the Tcp socket connection to the broker *)
+let connect_socket ~host ~port =
   let socket = Lwt_unix.socket Lwt_unix.PF_INET Lwt_unix.SOCK_STREAM 0 in
   let%lwt host_info = Lwt_unix.gethostbyname host in
   let server_address = host_info.Lwt_unix.h_addr_list.(0) in
@@ -365,17 +365,20 @@ let connect_str opts =
     |> charlist_to_str in
   (string_of_char (msg_header CONNECT opts.dup opts.qos opts.retain)) ^ remaining_len ^ vheader_payload
 
-let mqtt_client t ~opts =
+let connect t ~opts =
   let%lwt () = Lwt_io.write t.oc (connect_str opts) in
   let%lwt () = receive_connack (Lwt_io.read_chars t.ic) in
-  Logs.info (fun m -> m "Connect handshake complete");
-  let%lwt () = Lwt.join [
-    ping_loop ~interval:keep_alive_interval_default t.oc;
-    receive_packets t.ic t.oc] in
+  Logs.debug (fun m -> m "Connect handshake complete");
   return t
+
+let run t =
+  Lwt.join [
+    ping_loop ~interval:keep_alive_interval_default t.oc;
+    receive_packets t.ic t.oc
+  ]
 
 (* connect_to_broker *)
 let connect_to_broker ~opts ~broker ~port =
-  let%lwt socket = connect ~host:broker ~port:port in
+  let%lwt socket = connect_socket ~host:broker ~port:port in
   let t = of_socket socket in
-  mqtt_client t ~opts
+  connect t ~opts

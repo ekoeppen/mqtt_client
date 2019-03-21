@@ -10,7 +10,7 @@ let tls_connect ~broker ~port ~ca_file ~cert_file ~key_file =
   Lwt.return {ic; oc}
 
 let std_connect ~broker ~port =
-  let%lwt socket = Mqtt_lwt.connect ~host:broker ~port:port in
+  let%lwt socket = Mqtt_lwt.connect_socket ~host:broker ~port:port in
   Lwt.return (of_socket socket)
 
 let start_client ~broker ~port ~ca_file ~cert_file ~key_file =
@@ -18,7 +18,7 @@ let start_client ~broker ~port ~ca_file ~cert_file ~key_file =
       tls_connect ~broker ~port ~ca_file ~cert_file ~key_file
     else
       std_connect ~broker ~port) in
-  mqtt_client conn ~opts:default_conn_opts
+  connect conn ~opts:default_conn_opts
 
 let display_topic _ topic payload id =
   Logs_lwt.app (fun m -> m "Topic: %s Payload: %s Msg_id: %d" topic payload id)
@@ -26,14 +26,16 @@ let display_topic _ topic payload id =
 let sub ~broker ~port ~topic ~ca_file ~cert_file ~key_file =
   Logs.info (fun m -> m "Subscribing");
   let%lwt client = start_client ~broker ~port ~ca_file ~cert_file ~key_file in
-  let%lwt () = subscribe ~topics:[topic] client.oc in
-  let%lwt () = process_publish_pkt client display_topic in
-  Lwt.return ()
+  let%lwt () = subscribe ~topics:[topic] client in
+  Lwt.join [
+    process_publish_pkt client display_topic;
+    run client
+  ]
 
 let pub ~broker ~port ~topic ~message ~ca_file ~cert_file ~key_file =
   Logs.info (fun m -> m "Publishing");
   let%lwt client = start_client ~broker ~port ~ca_file ~cert_file ~key_file in
-  publish ~topic:topic ~payload:message client.oc
+  publish ~topic:topic ~payload:message client
 
 let setup_log style_renderer level =
   Fmt_tty.setup_std_outputs ?style_renderer ();
