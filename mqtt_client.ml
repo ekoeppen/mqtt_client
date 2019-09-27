@@ -27,7 +27,7 @@ let sub ~broker ~port ~topic ~ca_file ~cert_file ~key_file =
   Logs.info (fun m -> m "Subscribing");
   let%lwt client = start_client ~broker ~port ~ca_file ~cert_file ~key_file in
   let%lwt () = subscribe ~topics:[topic] client in
-  Lwt.join [
+  Lwt.pick [
     process_publish_pkt client display_topic;
     run client
   ]

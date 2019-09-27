@@ -5,6 +5,7 @@ let keep_alive_interval_default = 10.0 (*seconds*)
 let version = 3 (* MQTT version *)
 
 let msg_id = ref 0
+let ping_req = ref 0
 
 (* "private" Helper funcs *)
 let string_of_char c = String.make 1 c
@@ -233,6 +234,8 @@ let rec receive_packets ic oc =
        let payload = Some (String.sub header.buffer (topic_len + 2 + msg_id_len) payload_len) in
        let%lwt () = return (push_pw (Some { header ; topic ; msg_id; payload })) in
        send_puback oc (int_to_str2 msg_id))
+    | PINGRESP ->
+      decr ping_req; return ()
    | _ ->
      (return ())
   ) in
@@ -275,6 +278,10 @@ let send_ping_req w_chan =
 
 (* ping_loop: send a PINGREQ at regular intervals *)
 let rec ping_loop ?(interval=keep_alive_interval_default) w =
+  if !ping_req > 1 then begin
+    raise (Failure ("Failed to receive PINGRESP for earlier PINGREQ"));
+  end;
+  incr ping_req;
   let%lwt () = Lwt_unix.sleep interval in
   let%lwt () = send_ping_req w in
   ping_loop w
@@ -372,7 +379,7 @@ let connect t ~opts =
   return t
 
 let run t =
-  Lwt.join [
+  Lwt.pick [
     ping_loop ~interval:keep_alive_interval_default t.oc;
     receive_packets t.ic t.oc
   ]
